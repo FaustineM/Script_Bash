@@ -1,0 +1,117 @@
+#!/bin/bash
+
+# Unix evaluation v1 - Faustine Massin
+
+# Script to automatically install MediaWiki on CentOS 7 
+# MediaWiki is a free and open-source wiki application written in PHP.
+# It allows to create a wiki sites.
+# MediaWiki's homepage : https://www.mediawiki.org.
+
+#### PHP INSTALLATION ####
+
+echo ------------------   PHP INSTALLATION   ------------------
+
+# Manage PHP settings 
+PHP_TIME_OK=$(grep -v ";" /etc/php.ini | grep date.timezone | wc -l)
+
+if [ $PHP_TIME_OK -eq 0 ]
+then
+    sed -i.bck 's/;date.timezone =/date.timezone = UTC/g' /etc/php.ini
+fi
+
+# PHP modules and extensions installation
+yum install -y php-xml php-intl php-gd php-xcache php-mysql
+# No configuration needed for PHP
+
+#### Apache HTTPD server INSTALLATION ####
+
+echo ------------------   Apache HTTPD server INSTALLATION   ------------------
+
+yum install -y httpd                     
+systemctl start httpd
+systemctl enable httpd          #This command allows apache to restart automatically
+
+echo --- At this point, a manual test can be achieved to ensure the apache server is runing : 
+echo --- Open a browser and navigate to http://server-ip
+
+# Ask the user if he want to run the test ??????????????????????????????????????????????
+
+#### MariaDB INSTALLATION ####
+
+echo ------------------   MariaDB INSTALLATION   ------------------
+
+yum install -y mariadb-server           
+systemctl start mariadb
+systemctl enable mariadb          #This command allows apache to restart automatically
+
+#### MediaWiki INSTALLATION ####
+
+echo ------------------   MediaWiki INSTALLATION   ------------------
+
+# This script currently enable to download MediaWiki Server version 1.27.1
+# To download a newer version, just amend the ARCHIVE_URL variable
+ARCHIVE_URL="https://releases.wikimedia.org/mediawiki/1.27/mediawiki-1.27.1.tar.gz"
+
+# Ajouter dans le echo le num de la verson telecharger !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+echo The version currently download is "$ARCHIVE_URL"
+
+HTDOCS_PATH=/var/www/html
+WWW_SUBFOLDER="mediawiki"
+INSTALL_PATH="$HTDOCS_PATH/$WWW_SUBFOLDER" 
+TMP_FOLDER=$(mktemp -d)
+DOWNLOAD_PATH="$TMP_FOLDER/mediawiki.tar"
+
+# Dowload in a temporary folder which is empty because the files download may not be in a folder
+curl -L "$ARCHIVE_URL" > "$DOWNLOAD_PATH"
+mkdir "$INSTALL_PATH"
+tar xvf "$DOWNLOAD_PATH" --strip-components=1 -C "$INSTALL_PATH"
+
+echo --- The installation file are in "$INSTALL_PATH"
+
+#### DATABASE CONFIGURATION ####
+
+echo ------------------   DATABASE CONFIGURATION   ------------------
+
+DB_NAME=wiki
+echo --- The database name is "$DB_NAME"
+
+BASE_URL="/$WWW_SUBFOLDER/"
+
+# The user must defined a login and password
+# While the varaible is empty, keep asking the user to enter a login
+while [ -z $DB_USER ]; do
+	echo "Enter a login for the database :"
+	read DB_USER
+	echo "You entered: $DB_USER"
+done
+
+while [ -z $DB_PASS ]; do
+	echo "Enter a password for the database :"
+	read DB_PASS
+	echo "You entered: $DB_PASS"
+done
+ 
+mysqladmin -u $DB_USER  password '$DB_PASS' << EOF
+CREATE DATABASE $DB_NAME;
+grant ALL PRIVILEGES on $DB_NAME.* to '$DB_USER'@localhost ;
+FLUSH PRIVILEGES;
+EOF
+
+# Delete the temporary folder
+echo ------------------ Delete the temporary folder ------------------
+rm -rf "$TMP_FOLDER"
+
+#################################
+# Change some folders permissions:
+#chown -R apache:apache /var/www/html
+#chmod -R 755 /var/www/html
+###############################"
+
+# Restart the Apache service
+echo ------------------ Restart the Apache service ------------------
+systemctl restart httpd
+
+echo ------------------ You can now access MediaWiki ------------------
+echo Open a browser and navigate to http://server-ip and complete the required the steps to finish the installation. 
+
+exit 0
