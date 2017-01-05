@@ -34,7 +34,7 @@ systemctl enable httpd          #This command allows apache to restart automatic
 echo --- At this point, a manual test can be achieved to ensure the apache server is runing : 
 echo --- Open a browser and navigate to http://server-ip
 
-# Ask the user if he want to run the test ??????????????????????????????????????????????
+# TO DO Ask the user if he want to run the test. If yes, make pause.
 
 #### MariaDB INSTALLATION ####
 
@@ -52,7 +52,7 @@ echo ------------------   MediaWiki INSTALLATION   ------------------
 # To download a newer version, just amend the ARCHIVE_URL variable
 ARCHIVE_URL="https://releases.wikimedia.org/mediawiki/1.27/mediawiki-1.27.1.tar.gz"
 
-# Ajouter dans le echo le num de la verson telecharger !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# TO DO : Add the version number of mediawiki that will be download.
 echo The version currently download is "$ARCHIVE_URL"
 
 HTDOCS_PATH=/var/www/html
@@ -102,7 +102,7 @@ echo ------------------ Delete the temporary folder ------------------
 rm -rf "$TMP_FOLDER"
 
 #################################
-# Change some folders permissions:
+# To DO : Change some folders permissions:
 #chown -R apache:apache /var/www/html
 #chmod -R 755 /var/www/html
 ###############################"
