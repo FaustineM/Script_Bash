@@ -1,0 +1,322 @@
+#!/bin/bash
+
+# 20170131 : Faustine Massin - Script to install MediaWiki on CentOS 7
+
+# MediaWiki is a free and open-source wiki application written in PHP, which allows to create a wiki sites.
+# MediaWiki's homepage : https://www.mediawiki.org.
+
+# Check for latest release of mediawiki on : https://www.mediawiki.org/wiki/Download
+# 2017/01/31 : latest stable version is 1.28.0
+ARCHIVE_URL="https://releases.wikimedia.org/mediawiki/1.28/mediawiki-1.28.0.tar.gz"
+
+HTDOCS_PATH=/var/www/html
+WWW_SUBFOLDER="mediawiki"
+INSTALL_PATH="$HTDOCS_PATH/$WWW_SUBFOLDER"
+TMP_FOLDER=$(mktemp -d)
+DOWNLOAD_PATH="$TMP_FOLDER/mediawiki.tar"
+
+DB_USER=wikiUser
+DB_PASS=Passw0rd123
+DB_NAME=wikimediaDb
+
+# This function will enable to wait for the user to do an action
+pause() {
+        echo "Press <Enter> to continue..."
+        read touche
+        case "$touche" in
+        *)      echo ""
+                ;;
+        esac
+}
+
+echo "-------------------------------------------------------------"
+echo "----------- INSTALLATION OF MediaWiki ON CentOS 7 ----------- "
+echo ""
+
+# Ask an  outside party what is your IP address
+IPADDR=`curl http://icanhazip.com`
+
+#### Check if the user have root privileges ####
+if [[ "$EUID" -ne 0 ]]; then
+  echo ""
+  echo "You must be a root user in order to run this script !"
+  echo "Connect as root then try again."
+  echo ""
+  exit 1
+fi
+
+
+##### Before installing any package, packages and repository should be up to date. ####
+echo ""
+echo "----------- UPDATE PACKAGES AND REPOSITORY ----------- "
+yum -y update
+echo ""
+echo "Packages and repository are now up to date."
+echo "System ready for new packages installation."
+echo ""
+
+
+#### FIREWALL INSTALLATION ####
+echo ""
+echo "----------- FIREWALL INSTALLATION ----------- "
+echo ""
+
+yum install -y firewalld puppet-firewalld
+systemctl start firewalld.service         # Start the firewall
+systemctl enable firewalld.service        # Enable the firewall to start at boot time
+# Allow the traffic from the Apache web server serving conventional HTTP traffic
+firewall-cmd --permanent --add-service=http
+
+#### PHP INSTALLATION ####
+echo ""
+echo "----------- PHP INSTALLATION AND SETTINGS ----------- "
+echo ""
+
+# Since MediaWiki version 1.27, it uses a PHP version greater than 5.5.
+# The YUM repository contains PHP version 5.4 only.
+# Use the Webtatic repository to install a version of PHP greater than 5.5.
+
+# Installing EPEL repository (required to install Webtatic repository)
+yum -y install epel-release
+yum -y update
+yum clean all
+
+# Installing Webtatic repository
+rpm -Uvh https://mirror.webtatic.com/yum/el7/webtatic-release.rpm
+yum -y update
+yum clean all
+
+# PHP modules and extensions installation
+yum -y install php55w php55w-mysql php55w-xml php55w-intl php55w-gd php55w-mbstring texlive
+
+echo ""
+echo "--> PHP version :"
+php -v
+
+# Manage PHP settings
+PHP_TIME_OK=$(grep -v ";" /etc/php.ini | grep date.timezone | wc -l)
+if [[ "$PHP_TIME_OK" -eq 0 ]] ; then
+        sed -i.bck 's/;date.timezone =/date.timezone = UTC/g' /etc/php.ini
+fi
+
+
+#### Apache HTTPD server  INSTALLATION ####
+echo ""
+echo "----------- APACHE HTTPD SERVER INSTALLATION ----------- "
+echo ""
+yum install -y httpd
+systemctl start httpd.service               # Start Apache web server
+systemctl enable httpd.service              # Enable Apache Server to start at boot time
+
+#### MariaDB INSTALLATION ####
+echo ""
+echo "----------- MARIADB INSTALLATION ----------- "
+echo ""
+# MariaDB is a fork of MySQL
+yum install -y mariadb-server mariadb
+systemctl start mariadb             # Start MariaDB
+systemctl enable mariadb            # Enable MariaDB to start at boot time
+
+
+#### DATABASE CONFIGURATION ####
+echo ""
+echo " ----------- DATABASE CREATION AND CONFIGURATION ----------- "
+echo ""
+
+# The user can either use default value for login, password and database name or enter new one.
+echo "By default database connexion id is : $DB_USER and password is : $DB_PASS."
+while true; do
+    read -p "Do you want to keep this values ? (y/n)" yn
+    case "$yn" in
+        [Yy] ) echo "You will use default values"; DB_PASS1="" ; DB_PASS2="" ; break;;
+        [Nn] ) echo "Enter new id :"; read DB_USER ; echo "Enter new password : " ; read -s DB_PASS ; break;;
+        ###### TO DO : User must enter 2 times the pwd, then check if they are equal
+        * ) echo "Please answer y or n.";;
+    esac
+done
+
+echo ""
+echo "By default database name is : $DB_NAME."
+while true; do
+    read -p "Do you want to keep this value ? (y/n)" yn
+    case "$yn" in
+        [Yy] ) echo "You will use default values"; break;;
+        [Nn] ) read -r -p "Enter new database name : " DB_NAME ; echo "Database name  updated successfully" ; break;;
+        * ) echo "Please answer y or n.";;
+    esac
+done
+
+# 1. Login to MySQL command line
+# 2. Commands to remove some dangerous defaults and lock down access to the database system (Automating `mysql_secure_installation`)
+# 3. Create a database
+# 4. Create a new database user (using root user is not recommended for the databases)
+# 5. Amend privileges.
+echo ""
+echo "Please enter the user root password of the database (default : press <Enter>)."
+mysql -u root -p << EOF
+DELETE FROM mysql.user WHERE User='';
+DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+DROP DATABASE IF EXISTS test;
+DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+CREATE DATABASE IF NOT EXISTS $DB_NAME;
+CREATE USER $DB_USER@'localhost' IDENTIFIED BY '$DB_PASS';
+grant ALL PRIVILEGES on $DB_NAME.* to $DB_USER@'localhost' ;
+FLUSH PRIVILEGES;
+EOF
+
+# TO DO : resolve ERROR 1396 (HY000) at line 6: Operation CREATE USER failed for 'wikiUser'@'localhost'
+# Check if the user has already been created before trying to create it.
+
+#### MediaWiki INSTALLATION ####
+echo ""
+echo " ----------- MEDIAWIKI INSTALLATION ----------- "
+echo ""
+
+# Download MediaWiki Server from archive
+curl -L "$ARCHIVE_URL" > "$DOWNLOAD_PATH"
+
+# If the system encounter a problem while downloading the archive :
+if [[ "$?" -ne 0 ]]; then
+  # Check internet connexion
+  echo -e "GET http://google.com HTTP/1.0\n\n" | nc google.com 80 > /dev/null 2>&1
+  if [[ "$?" -ne 127 ]]; then
+    echo ""
+    echo "!!!!!!!!! You are offline !!!!!!!!!"
+    echo "Check your internet connexion then retry."
+    echo ""
+  else
+    echo ""
+    echo " Archive error."
+    echo " Please check the archive url before trying again."
+  fi
+  exit 1
+fi
+
+if [ ! -d "$INSTALL_PATH" ]; then
+    mkdir -p "$INSTALL_PATH"
+fi
+
+# Unpack the .tar file
+tar xvf "$DOWNLOAD_PATH" --strip-components=1 -C "$INSTALL_PATH"
+
+# If the system encounter a problem while unpacking the archive :
+if [[ "$?" -ne 0 ]]; then
+  # Check internet connexion
+  echo ""
+  echo "!!!!!!!! Archive error !!!!!!!!"
+  echo "Please check the archive url variable in the script before trying again."
+  exit 1
+fi
+
+# Delete temporary directory
+rm -rf "${TMP_FOLDER}"
+
+# Set appropriate permissions to the Apache process over Apache web root directory
+chown -R apache:apache "$HTDOCS_PATH"
+chmod -R 755 "$HTDOCS_PATH"
+
+# Restart the Apache service, the firewall
+systemctl restart httpd
+systemctl restart firewalld
+
+
+#### How to access MediaWiki on the web & configure it ####
+echo ""
+echo " ----------- ACCESSING MEDIAWIKI ----------- "
+echo ""
+
+echo "Open a browser and navigate to the web installer using http://$IPADDR/mediawiki/ and complete the required steps to finish the installation."
+echo ""
+
+
+while true; do
+    read -p "Do you encounter a message saying \"Forbidden You don't have permission to access on this server.\" ? (y/n)" yn
+    case "$yn" in
+      # If yes, disable the SELinux and restart the Apache server
+        [Yy] ) setenforce 0 ; systemctl restart httpd ; echo "SELinux disabled. Refresh your broswer tab."; break;;
+        [Nn] ) break;;
+        * ) echo "Please answer y or n.";;
+    esac
+done
+
+echo ""
+echo " ----------- Web installation and personnalisation ----------- "
+echo ""
+
+###### Automatically create Localsettings.php file in $INSTALL_PATH
+# Localsettings.php file contains the configuration of the MediaWiki.
+
+# TO DO : manage error Argument <admin> required!
+
+#echo "Enter admin id :"
+#read ADMIN_ID
+#echo "Enter admin password (min 8 char): "
+#read -s ADMIN_PWD
+#echo "Enter admin email :"
+#read ADMIN_MAIL
+
+#php /var/www/html/mediawiki/maintenance/install.php --admin=$ADMIN_ID --dbname="$DB_NAME" --wiki=Wiki  --dbpass="$DB_PASS" --dbserver=localhost --dbtype=mysql --dbuser="DB_USER"  --lang=en --scriptpath="/wiki/" --confpath=/var/www/html/mediawiki --installdbuser=root --installdbpass=root --name=mediawiki --pass=$ADMIN_PWD
+
+####### Wiki manually configure by the user
+echo "Click on \"Set up the wiki \" to proceed to the next step."
+echo ""
+pause
+echo " 1. Language"
+echo "Select the language to use in the installation and the Wiki language from drop down menu."
+echo "Click on \" Continue \" button to proceed to the next step."
+echo ""
+pause
+echo " 2. Welcome to MediaWiki!"
+echo "Click on \" Continue \" button to proceed to the next step."
+echo ""
+pause
+echo " 3. Connect to database"
+echo "Select MySQL as the database type."
+echo "Leave localhost in the value of database host."
+echo "Provide the name of your database : DB_USER"
+echo "Provide the username and password of the database user which you have created."
+echo "Click Continue to proceed further."
+echo ""
+pause
+echo " 4. Database settings"
+echo "Database used for web access : leave the option checked."
+echo "Storage engine and character set to use : leave the default option check for both of these options."
+echo ""
+pause
+echo " 5. Name"
+echo "Enter the name of your Wiki."
+echo "Enter project namespace (you can use the default name of your Wiki)."
+echo "Create the administrator account by providing the username, password and administrator email address."
+echo ""
+pause
+echo " 6. Install"
+echo "You can now onfigure more options by cliking \"Ask me more questions.\"."
+echo "To install the wiki clik on \"I\'m bored already, just install the wiki.\"."
+echo "Click Continue to proceed the installation."
+echo ""
+pause
+echo "MediaWiki is installed."
+echo ""
+echo "The installer has generated a LocalSettings.php file, which contains the configuration of the MediaWiki."
+echo "Click on \"Download LocalSettings.php\", if it did not start automatically."
+echo "Please place LocalSettings.php file in the base of the wiki installation directory : /var/www/html/ "
+echo ""
+pause
+
+# Restore files default SELinux security contexts.
+# Amend privileges on LocalSettings.php file
+restorecon -r /var/www/html/mediawiki/
+
+if [ ! -f "$INSTALL_PATH/LocalSettings.php" ]; then
+    echo "You must place the file LocalSettings.php in the directory $HTDOCS_PATH"
+else
+    chmod 644 /var/www/html/mediawiki/LocalSettings.php
+fi
+
+systemctl restart httpd.service
+systemctl restart mariadb.service
+
+echo ""
+echo "Once the file LocalSettings.php moved, you can enter your wiki and enjoy !"
+
+exit 0
