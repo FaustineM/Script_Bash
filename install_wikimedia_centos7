@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 20170131 : Faustine Massin - Script to install MediaWiki on CentOS 7
+# Script to install MediaWiki on CentOS 7
 
 # MediaWiki is a free and open-source wiki application written in PHP, which allows to create a wiki sites.
 # MediaWiki's homepage : https://www.mediawiki.org.
